@@ -1,20 +1,15 @@
 <?php
-// pages/order_create.php
 session_start();
 require_once __DIR__ . '/../config/db.php';
 require_once __DIR__ . '/../includes/functions.php';
 
-// ถ้ายังไม่ล็อกอิน → เด้งไป login
 if (!isLoggedIn()) {
     redirect('login.php');
 }
 
-// ### ดึงข้อมูลสวน (gardens) เพื่อแสดง dropdown
 $stmtGarden = $pdo->query("SELECT id, name FROM gardens ORDER BY name ASC");
 $gardens = $stmtGarden->fetchAll(PDO::FETCH_ASSOC);
 
-// ### ดึงข้อมูลต้นไม้ทั้งหมด (trees) เพื่อให้เลือกเป็นรายการออเดอร์
-// ดึง id, name, size, price, รูปแรก (thumbnail) ถ้ามี
 $sqlTrees = "
     SELECT t.id, t.name, t.size, t.price,
            (SELECT image_url FROM tree_images WHERE tree_id = t.id LIMIT 1) AS thumb
@@ -27,34 +22,28 @@ $trees = $stmtTree->fetchAll(PDO::FETCH_ASSOC);
 $errors = [];
 $success = "";
 
-// เมื่อกดบันทึก (POST)
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    // ตรวจ CSRF token
     if (empty($_POST['csrf_token']) || !verifyCsrfToken($_POST['csrf_token'])) {
         $errors[] = "Session หมดอายุ กรุณาลองใหม่อีกครั้ง";
     } else {
-        // sanitize ข้อมูลพื้นฐาน
         $garden_id         = (int)($_POST['garden_id'] ?? 0);
         $customer_name     = trim($_POST['customer_name'] ?? '');
         $customer_phone    = trim($_POST['customer_phone'] ?? '');
         $extra_cost        = trim($_POST['extra_cost'] ?? '0');
         $transport_fee     = trim($_POST['transportation_fee'] ?? '0');
 
-        // รายการต้นไม้ (เป็น array)
         $item_tree_ids     = $_POST['item_tree_id']     ?? [];
         $item_sizes        = $_POST['item_size']        ?? [];
         $item_quantities   = $_POST['item_quantity']    ?? [];
         $item_unitprices   = $_POST['item_unit_price']  ?? [];
         $itemCount = count($item_tree_ids);
 
-        // 1) validate พื้นฐาน
         if ($garden_id <= 0) {
             $errors[] = "กรุณาเลือกสวน";
         }
         if (empty($customer_name)) {
             $errors[] = "กรุณากรอกชื่อลูกค้า";
         }
-        // เบอร์ลูกค้าให้ว่างได้ (ไม่บังคับ)
         if ($extra_cost === '' || !is_numeric($extra_cost) || $extra_cost < 0) {
             $errors[] = "กรุณาระบุค่าราคาอื่น ๆ (Extra Cost) ให้ถูกต้อง หรือปล่อยเป็น 0";
         }
@@ -62,11 +51,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $errors[] = "กรุณาระบุค่าขนส่ง (Transportation Fee) ให้ถูกต้อง หรือปล่อยเป็น 0";
         }
 
-        // 2) validate รายการต้นไม้ อย่างน้อย 1 รายการ
         if ($itemCount < 1) {
             $errors[] = "กรุณาเพิ่มรายการต้นไม้อย่างน้อย 1 รายการ";
         } else {
-            $validatedItems = []; // เก็บรายการที่ valid แล้ว
+            $validatedItems = [];
             for ($i = 0; $i < $itemCount; $i++) {
                 $treeId     = (int)$item_tree_ids[$i];
                 $size       = trim($item_sizes[$i] ?? '');
@@ -86,7 +74,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $errors[] = "รายการต้นไม้ที่ " . ($i+1) . " กรุณาระบุราคา/ต้น (฿) ให้ถูกต้อง (≥ 0)";
                 }
 
-                // ถ้าไม่มี error สำหรับรายการนี้ ก็เก็บจริง
                 if (empty($errors)) {
                     $validatedItems[] = [
                         'tree_id'   => $treeId,
@@ -98,22 +85,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
         }
 
-        // 3) ถ้าไม่มี error เลย → ทำการบันทึกข้อมูล
         if (empty($errors)) {
-            // คำนวณยอดรวมต้นไม้ทั้งหมด
             $subtotal = 0;
             foreach ($validatedItems as $it) {
                 $subtotal += $it['quantity'] * $it['unit_price'];
             }
             $totalPrice = $subtotal + (float)$extra_cost + (float)$transport_fee;
 
-            // สร้าง order_code แบบสุ่ม (ใช้ uniqid + random_bytes เพื่อความยากในการเดา)
             $order_code = 'ORD-' . strtoupper(substr(bin2hex(random_bytes(4)), 0, 8));
 
-            // เริ่ม transaction
             $pdo->beginTransaction();
             try {
-                // 4.1) INSERT ลงตาราง orders พร้อม order_code
                 $sqlOrder = "
                     INSERT INTO orders 
                     (order_code, garden_id, customer_name, customer_phone, created_at, extra_cost, transportation_fee, total_price)
@@ -132,7 +114,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 ]);
                 $newOrderId = $pdo->lastInsertId();
 
-                // 4.2) INSERT แต่ละรายการ ลง order_items และอัปเดตยอดขายใน trees
                 $sqlItem = "
                     INSERT INTO order_items 
                     (order_id, tree_name, size, quantity, unit_price, total_price, image_link)
@@ -141,7 +122,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 ";
                 $stmtItem = $pdo->prepare($sqlItem);
 
-                // เตรียม statement สำหรับอัปเดต trees
                 $stmtUpdateTree = $pdo->prepare("
                     UPDATE trees 
                     SET sold = sold + :qty_sold, 
@@ -150,13 +130,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 ");
 
                 foreach ($validatedItems as $it) {
-                    // ดึงชื่อและรูปต้นไม้เพิ่มเติมจากตาราง trees/ tree_images
                     $stmtTreeInfo = $pdo->prepare("SELECT name FROM trees WHERE id = :tid");
                     $stmtTreeInfo->execute(['tid' => $it['tree_id']]);
                     $treeInfo = $stmtTreeInfo->fetch(PDO::FETCH_ASSOC);
                     $treeName = $treeInfo ? $treeInfo['name'] : 'Unknown';
-
-                    // ลิงก์รูปแรก (thumbnail) ถ้ามี
                     $stmtThumb = $pdo->prepare("SELECT image_url FROM tree_images WHERE tree_id = :tid LIMIT 1");
                     $stmtThumb->execute(['tid' => $it['tree_id']]);
                     $thumbRow = $stmtThumb->fetch(PDO::FETCH_ASSOC);
@@ -173,18 +150,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         'imglink'=> $imgLink
                     ]);
 
-                    //----- อัปเดทยอดขาย (sold) และจำนวนคงเหลือ (quantity) ของต้นไม้ -----
                     $stmtUpdateTree->execute([
                         'qty_sold' => $it['quantity'],
                         'tid'      => $it['tree_id']
                     ]);
                 }
 
-                // commit transaction
                 $pdo->commit();
                 $_SESSION['flash_message'] = "สร้างออเดอร์ (รหัส: {$order_code}) สำเร็จแล้ว";
 
-                // redirect ไปหน้าแสดงรายละเอียดออเดอร์ ด้วยรหัส order_code
                 redirect("order_view.php?code={$order_code}");
             } catch (Exception $e) {
                 $pdo->rollBack();
@@ -194,13 +168,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
-// สร้าง CSRF token
 $csrf_token = generateCsrfToken();
 ?>
 <?php include __DIR__ . '/../includes/header.php'; ?>
 
 <div class="container">
-    <!-- Breadcrumb navigation -->
     <nav aria-label="breadcrumb" class="mb-3">
         <ol class="breadcrumb">
             <li class="breadcrumb-item"><a href="orders.php" class="text-decoration-none">ออเดอร์/บิล</a></li>
@@ -218,7 +190,6 @@ $csrf_token = generateCsrfToken();
         </div>
     </div>
 
-    <!-- แสดง Error -->
     <?php if (!empty($errors)): ?>
         <div class="alert alert-danger d-flex align-items-center" role="alert">
             <i class="bi bi-exclamation-triangle-fill me-2"></i>
@@ -237,7 +208,6 @@ $csrf_token = generateCsrfToken();
 
         <div class="row">
             <div class="col-lg-8">
-                <!-- ข้อมูลลูกค้าและสวน -->
                 <div class="card shadow-sm border-0 mb-4">
                     <div class="card-header bg-white py-3">
                         <h5 class="card-title mb-0">
@@ -288,7 +258,6 @@ $csrf_token = generateCsrfToken();
                     </div>
                 </div>
 
-                <!-- รายการต้นไม้ -->
                 <div class="card shadow-sm border-0 mb-4">
                     <div class="card-header bg-white py-3">
                         <div class="d-flex justify-content-between align-items-center">
@@ -381,7 +350,6 @@ $csrf_token = generateCsrfToken();
                                     </tr>
                                     <?php endforeach; ?>
                                 <?php else: ?>
-                                    <!-- แถวเปล่า 1 แถว เมื่อโหลดครั้งแรก -->
                                     <tr>
                                         <td class="align-middle ps-3">1</td>
                                         <td>
@@ -433,7 +401,6 @@ $csrf_token = generateCsrfToken();
                     </div>
                 </div>
                 
-                <!-- ค่าใช้จ่ายเพิ่มเติม -->
                 <div class="card shadow-sm border-0 mb-4">
                     <div class="card-header bg-white py-3">
                         <h5 class="card-title mb-0">
@@ -472,10 +439,8 @@ $csrf_token = generateCsrfToken();
                 </div>
             </div>
 
-            <!-- สรุปราคา & คำแนะนำ (ด้านขวา) -->
             <div class="col-lg-4">
                 <div class="position-sticky" style="top: 1rem;">
-                    <!-- สรุปราคารวม -->
                     <div class="card shadow-sm border-0 mb-4">
                         <div class="card-header bg-primary bg-opacity-10 py-3">
                             <h5 class="card-title mb-0 text-primary">
@@ -504,7 +469,6 @@ $csrf_token = generateCsrfToken();
                         </div>
                     </div>
                     
-                    <!-- คำแนะนำ -->
                     <div class="card shadow-sm border-0 mb-4">
                         <div class="card-header bg-light py-3">
                             <h5 class="card-title mb-0">
@@ -526,7 +490,6 @@ $csrf_token = generateCsrfToken();
     </form>
 </div>
 
-<!-- JavaScript ช่วยคำนวณราคารวม และจัดการเพิ่ม/ลบแถว -->
 <script>
 document.addEventListener('DOMContentLoaded', function() {
     const tableBody = document.querySelector('#orderItemsTable tbody');
@@ -535,13 +498,11 @@ document.addEventListener('DOMContentLoaded', function() {
     const transportFeeInput = document.getElementById('transportation_fee');
     const grandTotalInput = document.getElementById('grand_total');
     
-    // Display elements for summary
     const subtotalDisplay = document.getElementById('subtotal-display');
     const extraCostDisplay = document.getElementById('extra-cost-display');
     const transportFeeDisplay = document.getElementById('transport-fee-display');
     const totalDisplay = document.getElementById('total-display');
 
-    // Format currency
     function formatCurrency(amount) {
         return new Intl.NumberFormat('th-TH', { 
             style: 'currency', 
@@ -551,7 +512,6 @@ document.addEventListener('DOMContentLoaded', function() {
         }).format(amount).replace('฿', '฿ ');
     }
 
-    // ฟังก์ชันอัปเดตราคารวมทั้งหมด
     function updateGrandTotal() {
         let subtotal = 0;
         document.querySelectorAll('.item-total').forEach(function(el) {
@@ -564,14 +524,12 @@ document.addEventListener('DOMContentLoaded', function() {
         
         grandTotalInput.value = total.toFixed(2);
         
-        // Update the display elements
         subtotalDisplay.textContent = formatCurrency(subtotal);
         extraCostDisplay.textContent = formatCurrency(extraCost);
         transportFeeDisplay.textContent = formatCurrency(transportFee);
         totalDisplay.textContent = formatCurrency(total);
     }
 
-    // ฟังก์ชันอัปเดตราคาแต่ละแถว (quantity * unit_price)
     function updateRowTotal(row) {
         const qtyInput   = row.querySelector('.item-qty');
         const priceInput = row.querySelector('input[name="item_unit_price[]"]');
@@ -582,7 +540,6 @@ document.addEventListener('DOMContentLoaded', function() {
         updateGrandTotal();
     }
 
-    // เมื่อเปลี่ยนแถว (select ต้นไม้) → ดึง size, price, thumb
     tableBody.addEventListener('change', function(event) {
         if (event.target.classList.contains('item-tree-select')) {
             const select = event.target;
@@ -592,12 +549,8 @@ document.addEventListener('DOMContentLoaded', function() {
             const price = selectedOption.getAttribute('data-price') || '0';
             const thumb = selectedOption.getAttribute('data-thumb') || '';
 
-            // set ขนาด
             row.querySelector('input[name="item_size[]"]').value = size;
-            // set ราคา/ต้น
             row.querySelector('input[name="item_unit_price[]"]').value = parseFloat(price).toFixed(2);
-            
-            // set รูปตัวอย่าง
             const imgCell = row.querySelector('td:nth-child(7)');
             if (thumb) {
                 imgCell.innerHTML = `<img src="${thumb}" alt="thumb" class="img-thumbnail" style="width:48px; height:48px; object-fit:cover;">`;
@@ -612,7 +565,6 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
 
-    // เมื่อเปลี่ยน quantity → อัปเดตราคารวมของแถว
     tableBody.addEventListener('input', function(event) {
         if (event.target.classList.contains('item-qty')) {
             const row = event.target.closest('tr');
@@ -620,7 +572,6 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
 
-    // ปุ่มลบแถว
     tableBody.addEventListener('click', function(event) {
         if (event.target.classList.contains('btn-remove-row') || event.target.parentElement.classList.contains('btn-remove-row')) {
             const rows = document.querySelectorAll('#orderItemsTable tbody tr');
@@ -632,7 +583,6 @@ document.addEventListener('DOMContentLoaded', function() {
             const row = event.target.closest('tr');
             row.remove();
             
-            // อัปเดตหมายเลขลำดับ (#) ทุกแถว
             document.querySelectorAll('#orderItemsTable tbody tr').forEach(function(r, idx) {
                 r.querySelector('td:first-child').textContent = idx + 1;
             });
@@ -640,7 +590,6 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
 
-    // ปุ่มเพิ่มแถวใหม่
     btnAddRow.addEventListener('click', function() {
         const rowCount = document.querySelectorAll('#orderItemsTable tbody tr').length;
         const newRow = document.createElement('tr');
@@ -691,11 +640,8 @@ document.addEventListener('DOMContentLoaded', function() {
         tableBody.appendChild(newRow);
     });
 
-    // เมื่อเปลี่ยนค่า Extra Cost / Transportation Fee → อัปเดตยอดรวมใหม่
     extraCostInput.addEventListener('input', updateGrandTotal);
     transportFeeInput.addEventListener('input', updateGrandTotal);
-
-    // เรียกอัปเดตครั้งแรก
     updateGrandTotal();
 });
 </script>

@@ -1,58 +1,47 @@
 <?php
-// pages/profile.php
 session_start();
 
 require_once __DIR__ . '/../config/db.php';
 require_once __DIR__ . '/../includes/functions.php';
 
-// 1) ตรวจว่าผู้ใช้ล็อกอินหรือไม่
 if (!isLoggedIn()) {
     redirect('login.php');
 }
 
-// รับ user_id จาก session
 $userId = $_SESSION['user_id'];
 
-// 2) ดึงข้อมูลผู้ใช้จากฐานข้อมูล
 $stmt = $pdo->prepare("SELECT id, name, email, username, status, profile_pic FROM users WHERE id = :id LIMIT 1");
 $stmt->execute(['id' => $userId]);
 $user = $stmt->fetch(PDO::FETCH_ASSOC);
 
 if (!$user) {
-    // กรณีข้อมูลผู้ใช้ไม่พบ (เกิดกรณี session แต่ user ถูกลบ) ให้ logout
     redirect('logout.php');
 }
 
 $errors = [];
 $success = "";
 
-// 3) ประมวลผลฟอร์มเมื่อมีการ POST (อัปเดตโปรไฟล์)
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    // ตรวจ CSRF token
     if (empty($_POST['csrf_token']) || !verifyCsrfToken($_POST['csrf_token'])) {
         $errors[] = "Session หมดอายุ กรุณาลองใหม่อีกครั้ง";
     } else {
-        // sanitize ข้อมูลจากฟอร์ม
-        $name     = trim($_POST['name'] ?? '');
-        $email    = trim($_POST['email'] ?? '');
+        $name = trim($_POST['name'] ?? '');
+        $email = trim($_POST['email'] ?? '');
         $username = trim($_POST['username'] ?? '');
-        $password = trim($_POST['password'] ?? '');          // รหัสผ่านใหม่ (ถ้ามี)
+        $password = trim($_POST['password'] ?? '');
         $confirmPassword = trim($_POST['confirm_password'] ?? '');
 
-        // validate ชื่อ
         if (empty($name)) {
             $errors[] = "กรุณากรอกชื่อ";
         } elseif (mb_strlen($name) > 100) {
             $errors[] = "ชื่อยาวเกินไป (ไม่เกิน 100 ตัวอักษร)";
         }
 
-        // validate email
         if (empty($email)) {
             $errors[] = "กรุณากรอกอีเมล";
         } elseif (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
             $errors[] = "รูปแบบอีเมลไม่ถูกต้อง";
         } else {
-            // ตรวจว่ามี email ซ้ำกับ user คนอื่นหรือไม่
             $stmtEmail = $pdo->prepare("SELECT id FROM users WHERE email = :email AND id != :id LIMIT 1");
             $stmtEmail->execute(['email' => $email, 'id' => $userId]);
             if ($stmtEmail->fetch()) {
@@ -60,13 +49,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
         }
 
-        // validate username
         if (empty($username)) {
             $errors[] = "กรุณากรอกชื่อผู้ใช้ (username)";
         } elseif (!preg_match('/^[a-zA-Z0-9_]{3,20}$/', $username)) {
             $errors[] = "ชื่อผู้ใช้ต้องเป็นตัวอักษร a-z, ตัวเลข หรือ _ (3-20 ตัวอักษร)";
         } else {
-            // ตรวจว่ามี username ซ้ำกับ user คนอื่นหรือไม่
             $stmtUser = $pdo->prepare("SELECT id FROM users WHERE username = :username AND id != :id LIMIT 1");
             $stmtUser->execute(['username' => $username, 'id' => $userId]);
             if ($stmtUser->fetch()) {
@@ -74,7 +61,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
         }
 
-        // validate password ถ้ามีการกรอก (เปลี่ยนรหัสผ่าน)
         $newPasswordHash = null;
         if ($password !== '' || $confirmPassword !== '') {
             if (mb_strlen($password) < 6) {
@@ -84,13 +70,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $errors[] = "รหัสผ่านใหม่กับยืนยันรหัสผ่านไม่ตรงกัน";
             }
             if (empty($errors)) {
-                // ถ้าไม่มี error ให้แปลง hash ด้วย password_hash
                 $newPasswordHash = password_hash($password, PASSWORD_DEFAULT);
             }
         }
 
-        // --- จัดการไฟล์รูปโปรไฟล์ (กรณีผู้ใช้เลือกอัปโหลด) ---
-        $profilePic = $user['profile_pic']; // เก็บค่าเดิมไว้ก่อน
+        $profilePic = $user['profile_pic'];
         if (isset($_FILES['profile_pic']) && $_FILES['profile_pic']['error'] !== UPLOAD_ERR_NO_FILE) {
             $uploaded = $_FILES['profile_pic'];
             $allowedTypes = ['image/jpeg', 'image/png', 'image/gif'];
@@ -105,26 +89,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $errors[] = "เกิดข้อผิดพลาดในการอัปโหลดรูปภาพ";
             }
 
-            // ถ้า validation ไฟล์ผ่านแล้ว ให้ย้ายไฟล์
             if (empty($errors)) {
-                // สร้างโฟลเดอร์เก็บรูปโปรไฟล์ ถ้ายังไม่มี
                 $profileDir = __DIR__ . '/../uploads/profiles/' . $userId . '/';
                 if (!is_dir($profileDir)) {
                     mkdir($profileDir, 0755, true);
                 }
-                // ลบรูปโปรไฟล์เก่า (ถ้ามี) เพื่อลดพื้นที่
                 if (!empty($user['profile_pic'])) {
                     $oldPicPath = __DIR__ . '/..' . $user['profile_pic'];
                     if (file_exists($oldPicPath)) {
                         unlink($oldPicPath);
                     }
                 }
-                // สร้างชื่อไฟล์สุ่ม (ป้องกันชื่อซ้ำ)
                 $ext = pathinfo($uploaded['name'], PATHINFO_EXTENSION);
                 $newFilename = 'profile_' . $userId . '_' . uniqid() . '.' . $ext;
                 $destination = $profileDir . $newFilename;
                 if (move_uploaded_file($uploaded['tmp_name'], $destination)) {
-                    // เก็บ URL แบบ relative (ใช้แสดงในส่วน frontend)
                     $profilePic = '/uploads/profiles/' . $userId . '/' . $newFilename;
                 } else {
                     $errors[] = "ไม่สามารถบันทึกรูปโปรไฟล์ได้ กรุณาลองใหม่";
@@ -132,19 +111,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
         }
 
-        // หากไม่มีข้อผิดพลาดใด ๆ ให้ UPDATE ข้อมูลผู้ใช้
         if (empty($errors)) {
-            // เริ่มสร้าง SQL query สำหรับ UPDATE
             $sqlUpdate = "UPDATE users SET name = :name, email = :email, username = :username, profile_pic = :profile_pic";
             $params = [
-                'name'        => $name,
-                'email'       => $email,
-                'username'    => $username,
+                'name' => $name,
+                'email' => $email,
+                'username' => $username,
                 'profile_pic' => $profilePic,
-                'id'          => $userId
+                'id' => $userId
             ];
 
-            // ถ้ามีรหัสผ่านใหม่ ให้เพิ่มใน SQL และ params
             if ($newPasswordHash !== null) {
                 $sqlUpdate .= ", password = :password";
                 $params['password'] = $newPasswordHash;
@@ -153,18 +129,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $sqlUpdate .= " WHERE id = :id";
             $stmtUpd = $pdo->prepare($sqlUpdate);
             $stmtUpd->execute($params);
-
-            // รีเซ็ต session['username'] หรือข้อมูลที่ต้องการแสดงในเมนู (ถ้า username ถูกแก้ไข)
             $_SESSION['username'] = $username;
-
-            // ตั้งข้อความสำเร็จ และรีเฟรชหน้าเพื่อ reload ข้อมูลใหม่
             $_SESSION['flash_message'] = "อัปเดตโปรไฟล์เรียบร้อยแล้ว";
             redirect('profile.php');
         }
     }
 }
 
-// สร้าง CSRF token
 $csrf_token = generateCsrfToken();
 ?>
 <?php include __DIR__ . '/../includes/header.php'; ?>
@@ -181,7 +152,6 @@ $csrf_token = generateCsrfToken();
         </div>
     </div>
 
-    <!-- Flash Message -->
     <?php if (!empty($_SESSION['flash_message'])): ?>
         <div class="alert alert-success alert-dismissible fade show d-flex align-items-center" role="alert">
             <i class="bi bi-check-circle-fill me-2"></i>
@@ -191,7 +161,6 @@ $csrf_token = generateCsrfToken();
         </div>
     <?php endif; ?>
 
-    <!-- Error Messages -->
     <?php if (!empty($errors)): ?>
         <div class="alert alert-danger d-flex align-items-center" role="alert">
             <i class="bi bi-exclamation-triangle-fill me-2"></i>
@@ -207,7 +176,6 @@ $csrf_token = generateCsrfToken();
 
     <div class="row">
         <div class="col-md-4 mb-4 mb-md-0">
-            <!-- Profile Card -->
             <div class="card border-0 shadow-sm">
                 <div class="card-header bg-white py-3">
                     <h5 class="card-title mb-0">
@@ -217,8 +185,7 @@ $csrf_token = generateCsrfToken();
                 <div class="card-body text-center">
                     <div class="mb-4 position-relative mx-auto" style="width:150px; height:150px;">
                         <?php if (!empty($user['profile_pic'])): ?>
-                            <img src="<?= e($user['profile_pic']); ?>" alt="Profile" 
-                                class="rounded-circle img-thumbnail" 
+                            <img src="<?= e($user['profile_pic']); ?>" alt="Profile" class="rounded-circle img-thumbnail"
                                 style="width:100%; height:100%; object-fit:cover;">
                         <?php else: ?>
                             <div class="bg-light rounded-circle d-flex align-items-center justify-content-center"
@@ -227,13 +194,13 @@ $csrf_token = generateCsrfToken();
                             </div>
                         <?php endif; ?>
                     </div>
-                    
+
                     <h5 class="mt-2 mb-1"><?= e($user['name']); ?></h5>
                     <p class="text-muted mb-2">@<?= e($user['username']); ?></p>
                     <div class="d-flex justify-content-center align-items-center gap-1 mb-3">
                         <span class="badge bg-success">Active</span>
                     </div>
-                    
+
                     <div class="d-flex justify-content-center mb-2">
                         <label for="profile_pic" class="btn btn-outline-primary">
                             <i class="bi bi-camera-fill me-1"></i>เปลี่ยนรูปโปรไฟล์
@@ -253,9 +220,8 @@ $csrf_token = generateCsrfToken();
                 </div>
             </div>
         </div>
-        
+
         <div class="col-md-8">
-            <!-- Profile Edit Form -->
             <div class="card border-0 shadow-sm">
                 <div class="card-header bg-white py-3">
                     <h5 class="card-title mb-0">
@@ -263,10 +229,11 @@ $csrf_token = generateCsrfToken();
                     </h5>
                 </div>
                 <div class="card-body">
-                    <form action="<?= e(basename($_SERVER['PHP_SELF'])); ?>" method="post" enctype="multipart/form-data" novalidate>
+                    <form action="<?= e(basename($_SERVER['PHP_SELF'])); ?>" method="post" enctype="multipart/form-data"
+                        novalidate>
                         <input type="hidden" name="csrf_token" value="<?= e($csrf_token); ?>">
                         <input type="file" name="profile_pic" id="profile_pic" class="d-none" accept="image/*">
-                        
+
                         <div class="mb-3">
                             <label for="name" class="form-label">ชื่อ</label>
                             <div class="input-group">
@@ -275,7 +242,7 @@ $csrf_token = generateCsrfToken();
                                     value="<?= e($user['name']); ?>" required maxlength="100">
                             </div>
                         </div>
-                        
+
                         <div class="mb-3">
                             <label for="email" class="form-label">อีเมล</label>
                             <div class="input-group">
@@ -284,7 +251,7 @@ $csrf_token = generateCsrfToken();
                                     value="<?= e($user['email']); ?>" required>
                             </div>
                         </div>
-                        
+
                         <div class="mb-4">
                             <label for="username" class="form-label">ชื่อผู้ใช้</label>
                             <div class="input-group">
@@ -294,34 +261,34 @@ $csrf_token = generateCsrfToken();
                             </div>
                             <div class="form-text">ประกอบด้วย a-z, ตัวเลข หรือ _ (3-20 ตัวอักษร)</div>
                         </div>
-                        
+
                         <div class="card bg-light border-0 mb-4">
                             <div class="card-body">
                                 <h6 class="card-subtitle mb-3 text-muted">
                                     <i class="bi bi-shield-lock me-1"></i>เปลี่ยนรหัสผ่าน (ไม่บังคับ)
                                 </h6>
-                                
+
                                 <div class="mb-3">
                                     <label for="password" class="form-label">รหัสผ่านใหม่</label>
                                     <div class="input-group">
                                         <span class="input-group-text"><i class="bi bi-key"></i></span>
-                                        <input type="password" name="password" id="password" class="form-control" 
+                                        <input type="password" name="password" id="password" class="form-control"
                                             autocomplete="new-password">
                                     </div>
                                     <div class="form-text">เว้นว่างไว้หากไม่ต้องการเปลี่ยน (อย่างน้อย 6 ตัวอักษร)</div>
                                 </div>
-                                
+
                                 <div class="mb-0">
                                     <label for="confirm_password" class="form-label">ยืนยันรหัสผ่านใหม่</label>
                                     <div class="input-group">
                                         <span class="input-group-text"><i class="bi bi-shield"></i></span>
-                                        <input type="password" name="confirm_password" id="confirm_password" 
+                                        <input type="password" name="confirm_password" id="confirm_password"
                                             class="form-control" autocomplete="new-password">
                                     </div>
                                 </div>
                             </div>
                         </div>
-                        
+
                         <div class="d-flex justify-content-end">
                             <a href="dashboard.php" class="btn btn-outline-secondary me-2">
                                 <i class="bi bi-x-circle me-1"></i>ยกเลิก
@@ -338,62 +305,62 @@ $csrf_token = generateCsrfToken();
 </div>
 
 <script>
-document.addEventListener('DOMContentLoaded', function() {
-    // Make the profile picture clickable to trigger file upload
-    document.querySelector('label[for="profile_pic"]').addEventListener('click', function() {
-        document.getElementById('profile_pic').click();
-    });
-    
-    // Preview image when selected
-    document.getElementById('profile_pic').addEventListener('change', function() {
-        if (this.files && this.files[0]) {
-            const reader = new FileReader();
-            reader.onload = function(e) {
-                const profileImages = document.querySelectorAll('.rounded-circle.img-thumbnail, .bg-light.rounded-circle');
-                profileImages.forEach(img => {
-                    if (img.tagName === 'IMG') {
-                        img.src = e.target.result;
-                    } else {
-                        // It's a div with an icon, replace it with an image
-                        const parent = img.parentNode;
-                        const newImg = document.createElement('img');
-                        newImg.src = e.target.result;
-                        newImg.alt = 'Profile';
-                        newImg.classList.add('rounded-circle', 'img-thumbnail');
-                        newImg.style.width = '100%';
-                        newImg.style.height = '100%';
-                        newImg.style.objectFit = 'cover';
-                        parent.replaceChild(newImg, img);
-                    }
-                });
+    document.addEventListener('DOMContentLoaded', function () {
+        document.querySelector('label[for="profile_pic"]').addEventListener('click', function () {
+            document.getElementById('profile_pic').click();
+        });
+
+        document.getElementById('profile_pic').addEventListener('change', function () {
+            if (this.files && this.files[0]) {
+                const reader = new FileReader();
+                reader.onload = function (e) {
+                    const profileImages = document.querySelectorAll('.rounded-circle.img-thumbnail, .bg-light.rounded-circle');
+                    profileImages.forEach(img => {
+                        if (img.tagName === 'IMG') {
+                            img.src = e.target.result;
+                        } else {
+                            const parent = img.parentNode;
+                            const newImg = document.createElement('img');
+                            newImg.src = e.target.result;
+                            newImg.alt = 'Profile';
+                            newImg.classList.add('rounded-circle', 'img-thumbnail');
+                            newImg.style.width = '100%';
+                            newImg.style.height = '100%';
+                            newImg.style.objectFit = 'cover';
+                            parent.replaceChild(newImg, img);
+                        }
+                    });
+                }
+                reader.readAsDataURL(this.files[0]);
             }
-            reader.readAsDataURL(this.files[0]);
-        }
+        });
     });
-});
 </script>
 
 <style>
-.btn-success {
-    background-color: #2e7d32;
-    border-color: #2e7d32;
-}
-.btn-success:hover {
-    background-color: #1b5e20;
-    border-color: #1b5e20;
-}
-.form-control:focus {
-    border-color: #81c784;
-    box-shadow: 0 0 0 0.25rem rgba(46, 125, 50, 0.25);
-}
-.img-thumbnail {
-    padding: 0.25rem;
-    background-color: #fff;
-    border: 1px solid #dee2e6;
-    border-radius: 50%;
-    max-width: 100%;
-    height: auto;
-}
+    .btn-success {
+        background-color: #2e7d32;
+        border-color: #2e7d32;
+    }
+
+    .btn-success:hover {
+        background-color: #1b5e20;
+        border-color: #1b5e20;
+    }
+
+    .form-control:focus {
+        border-color: #81c784;
+        box-shadow: 0 0 0 0.25rem rgba(46, 125, 50, 0.25);
+    }
+
+    .img-thumbnail {
+        padding: 0.25rem;
+        background-color: #fff;
+        border: 1px solid #dee2e6;
+        border-radius: 50%;
+        max-width: 100%;
+        height: auto;
+    }
 </style>
 
 <?php include __DIR__ . '/../includes/footer.php'; ?>

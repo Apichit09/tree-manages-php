@@ -1,19 +1,15 @@
 <?php
-// pages/dashboard.php
 
 session_start();
 require_once __DIR__ . '/../config/db.php';
 require_once __DIR__ . '/../includes/functions.php';
 
-// ถ้ายังไม่ล็อกอิน ให้ไปหน้า login
 if (!isLoggedIn()) {
     redirect('login.php');
 }
 
-// ฟังก์ชันช่วยดึงข้อมูลสรุปของเดือนนี้
 function getMonthlySummary(PDO $pdo, int $year, int $month)
 {
-    // 1) จำนวนต้นไม้ที่เพิ่มเข้ามาในเดือนนี้
     $stmt = $pdo->prepare("
         SELECT COUNT(*) AS count_added
         FROM trees
@@ -21,12 +17,7 @@ function getMonthlySummary(PDO $pdo, int $year, int $month)
           AND MONTH(added_at) = :month
     ");
     $stmt->execute(['year' => $year, 'month' => $month]);
-    $countAdded = (int)$stmt->fetch(PDO::FETCH_ASSOC)['count_added'];
-
-    // 2) จำนวนต้นไม้ที่ตายในเดือนนี้ (SUM จากฟิลด์ died ของต้นไม้ที่มีวันที่ added_at ภายในเดือนนี้)
-    //    สมมติว่า `died` คือจำนวนต้นไม้ที่ตายสะสม ณ ปัจจุบัน
-    //    เราอาจประเมินว่า “ต้นไม้ที่ตายในเดือนนี้” เท่ากับ SUM(died) ในต้นไม้ที่อัปเดตข้อมูลภายในเดือนนั้น
-    //    แต่ในกรณีฐานข้อมูลไม่มี timestamp อัปเดต `died` แยก เราจะใช้ค่า SUM(died) ของต้นไม้ที่ added_at ในเดือนนั้น
+    $countAdded = (int) $stmt->fetch(PDO::FETCH_ASSOC)['count_added'];
     $stmt = $pdo->prepare("
         SELECT SUM(died) AS sum_died
         FROM trees
@@ -34,9 +25,7 @@ function getMonthlySummary(PDO $pdo, int $year, int $month)
           AND MONTH(added_at) = :month
     ");
     $stmt->execute(['year' => $year, 'month' => $month]);
-    $sumDied = (int)$stmt->fetch(PDO::FETCH_ASSOC)['sum_died'];
-
-    // 3) จำนวนต้นไม้ที่ขายในเดือนนี้ (SUM(sold) ของต้นไม้ที่ added_at ในเดือนนี้)
+    $sumDied = (int) $stmt->fetch(PDO::FETCH_ASSOC)['sum_died'];
     $stmt = $pdo->prepare("
         SELECT SUM(sold) AS sum_sold
         FROM trees
@@ -44,9 +33,8 @@ function getMonthlySummary(PDO $pdo, int $year, int $month)
           AND MONTH(added_at) = :month
     ");
     $stmt->execute(['year' => $year, 'month' => $month]);
-    $sumSold = (int)$stmt->fetch(PDO::FETCH_ASSOC)['sum_sold'];
+    $sumSold = (int) $stmt->fetch(PDO::FETCH_ASSOC)['sum_sold'];
 
-    // 4) ยอดรายรับในเดือนนี้ (SUM total_price จาก orders)
     $stmt = $pdo->prepare("
         SELECT COALESCE(SUM(total_price), 0) AS income
         FROM orders
@@ -54,57 +42,50 @@ function getMonthlySummary(PDO $pdo, int $year, int $month)
           AND MONTH(created_at) = :month
     ");
     $stmt->execute(['year' => $year, 'month' => $month]);
-    $income = (float)$stmt->fetch(PDO::FETCH_ASSOC)['income'];
-
-    // 5) ยอดรายจ่ายในเดือนนี้ (สมมติว่าไม่มีตาราง expenses หากคุณมีตารางรายจ่ายโปรดปรับ query ตรงนี้)
-    //    ตอนนี้ให้ตั้งค่า default เป็น 0 (หรือคุณอาจสร้างตาราง expenses เพิ่มในภายหลัง)
+    $income = (float) $stmt->fetch(PDO::FETCH_ASSOC)['income'];
     $expense = 0.00;
 
     return [
-        'added'   => $countAdded,
-        'died'    => $sumDied,
-        'sold'    => $sumSold,
-        'income'  => $income,
+        'added' => $countAdded,
+        'died' => $sumDied,
+        'sold' => $sumSold,
+        'income' => $income,
         'expense' => $expense
     ];
 }
 
-// กำหนดปีและเดือนปัจจุบัน
-$currentYear  = (int)date('Y');
-$currentMonth = (int)date('m');
+$currentYear = (int) date('Y');
+$currentMonth = (int) date('m');
 
-// ดึงข้อมูลสรุปของเดือนนี้
 $summaryThisMonth = getMonthlySummary($pdo, $currentYear, $currentMonth);
 
-// เตรียมข้อมูลกราฟย้อนหลัง 12 เดือน (ช่วงนี้เริ่มตั้งแต่เดือนปัจจุบันถอยหลัง 11 เดือน)
-$labels          = [];
-$dataIncome      = [];
-$dataExpense     = [];
-$dataCountAdded  = [];
-$dataSumDied     = [];
-$dataSumSold     = [];
+$labels = [];
+$dataIncome = [];
+$dataExpense = [];
+$dataCountAdded = [];
+$dataSumDied = [];
+$dataSumSold = [];
 
 for ($i = 11; $i >= 0; $i--) {
     $dt = new DateTime("first day of -{$i} month");
-    $y  = (int)$dt->format('Y');
-    $m  = (int)$dt->format('m');
+    $y = (int) $dt->format('Y');
+    $m = (int) $dt->format('m');
     $labels[] = $dt->format('M Y'); // เช่น “Jul 2024”, “Aug 2024” เป็นต้น
 
     $monthSummary = getMonthlySummary($pdo, $y, $m);
-    $dataIncome[]     = $monthSummary['income'];
-    $dataExpense[]    = $monthSummary['expense'];
+    $dataIncome[] = $monthSummary['income'];
+    $dataExpense[] = $monthSummary['expense'];
     $dataCountAdded[] = $monthSummary['added'];
-    $dataSumDied[]    = $monthSummary['died'];
-    $dataSumSold[]    = $monthSummary['sold'];
+    $dataSumDied[] = $monthSummary['died'];
+    $dataSumSold[] = $monthSummary['sold'];
 }
 
-// แปลงเป็น JSON เพื่อใช้ใน JavaScript (Chart.js)
-$labelsJson         = json_encode($labels, JSON_UNESCAPED_UNICODE);
-$dataIncomeJson     = json_encode($dataIncome);
-$dataExpenseJson    = json_encode($dataExpense);
+$labelsJson = json_encode($labels, JSON_UNESCAPED_UNICODE);
+$dataIncomeJson = json_encode($dataIncome);
+$dataExpenseJson = json_encode($dataExpense);
 $dataCountAddedJson = json_encode($dataCountAdded);
-$dataSumDiedJson    = json_encode($dataSumDied);
-$dataSumSoldJson    = json_encode($dataSumSold);
+$dataSumDiedJson = json_encode($dataSumDied);
+$dataSumSoldJson = json_encode($dataSumSold);
 
 ?>
 <?php include __DIR__ . '/../includes/header.php'; ?>
@@ -113,7 +94,8 @@ $dataSumSoldJson    = json_encode($dataSumSold);
     <div class="row mb-4">
         <div class="col-12">
             <div class="d-flex justify-content-between align-items-center">
-                <h2 class="mb-0"><i class="bi bi-speedometer2 me-2 text-primary"></i>แดชบอร์ดสรุปประจำเดือน <?= date('F Y') ?></h2>
+                <h2 class="mb-0"><i class="bi bi-speedometer2 me-2 text-primary"></i>แดชบอร์ดสรุปประจำเดือน
+                    <?= date('F Y') ?></h2>
                 <div>
                     <button class="btn btn-sm btn-outline-success">
                         <i class="bi bi-download me-1"></i> ส่งออกรายงาน
@@ -124,9 +106,7 @@ $dataSumSoldJson    = json_encode($dataSumSold);
         </div>
     </div>
 
-    <!-- สรุปไฮไลต์ -->
     <div class="row row-cols-1 row-cols-md-2 row-cols-lg-5 g-4 mb-4">
-        <!-- ต้นไม้ที่เพิ่มเข้ามา -->
         <div class="col">
             <div class="card h-100 border-0 shadow-sm">
                 <div class="card-body">
@@ -143,7 +123,6 @@ $dataSumSoldJson    = json_encode($dataSumSold);
                 </div>
             </div>
         </div>
-        <!-- ต้นไม้ที่ตาย -->
         <div class="col">
             <div class="card h-100 border-0 shadow-sm">
                 <div class="card-body">
@@ -160,7 +139,6 @@ $dataSumSoldJson    = json_encode($dataSumSold);
                 </div>
             </div>
         </div>
-        <!-- ต้นไม้ที่ขาย -->
         <div class="col">
             <div class="card h-100 border-0 shadow-sm">
                 <div class="card-body">
@@ -177,7 +155,6 @@ $dataSumSoldJson    = json_encode($dataSumSold);
                 </div>
             </div>
         </div>
-        <!-- รายรับ -->
         <div class="col">
             <div class="card h-100 border-0 shadow-sm">
                 <div class="card-body">
@@ -194,7 +171,6 @@ $dataSumSoldJson    = json_encode($dataSumSold);
                 </div>
             </div>
         </div>
-        <!-- รายจ่าย (ถ้ามี) -->
         <div class="col">
             <div class="card h-100 border-0 shadow-sm">
                 <div class="card-body">
@@ -214,7 +190,6 @@ $dataSumSoldJson    = json_encode($dataSumSold);
     </div>
 
     <div class="row mb-4">
-        <!-- กราฟรายรับ vs รายจ่าย ย้อนหลัง 12 เดือน -->
         <div class="col-lg-6 mb-4">
             <div class="card border-0 shadow-sm">
                 <div class="card-header bg-white d-flex justify-content-between align-items-center py-3">
@@ -222,14 +197,18 @@ $dataSumSoldJson    = json_encode($dataSumSold);
                         <i class="bi bi-graph-up text-primary me-2"></i>รายรับ - รายจ่าย
                     </h5>
                     <div class="dropdown">
-                        <button class="btn btn-sm btn-light" type="button" id="incomeDropdown" data-bs-toggle="dropdown" aria-expanded="false">
+                        <button class="btn btn-sm btn-light" type="button" id="incomeDropdown" data-bs-toggle="dropdown"
+                            aria-expanded="false">
                             <i class="bi bi-three-dots-vertical"></i>
                         </button>
                         <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="incomeDropdown">
                             <li><a class="dropdown-item" href="#"><i class="bi bi-download me-2"></i>ดาวน์โหลด</a></li>
                             <li><a class="dropdown-item" href="#"><i class="bi bi-fullscreen me-2"></i>ขยายกราฟ</a></li>
-                            <li><hr class="dropdown-divider"></li>
-                            <li><a class="dropdown-item" href="#"><i class="bi bi-info-circle me-2"></i>ข้อมูลเพิ่มเติม</a></li>
+                            <li>
+                                <hr class="dropdown-divider">
+                            </li>
+                            <li><a class="dropdown-item" href="#"><i
+                                        class="bi bi-info-circle me-2"></i>ข้อมูลเพิ่มเติม</a></li>
                         </ul>
                     </div>
                 </div>
@@ -239,7 +218,6 @@ $dataSumSoldJson    = json_encode($dataSumSold);
             </div>
         </div>
 
-        <!-- กราฟสถิติ ต้นไม้เพิ่ม/ตาย/ขาย ย้อนหลัง 12 เดือน -->
         <div class="col-lg-6 mb-4">
             <div class="card border-0 shadow-sm">
                 <div class="card-header bg-white d-flex justify-content-between align-items-center py-3">
@@ -247,14 +225,18 @@ $dataSumSoldJson    = json_encode($dataSumSold);
                         <i class="bi bi-bar-chart-fill text-primary me-2"></i>สถิติต้นไม้
                     </h5>
                     <div class="dropdown">
-                        <button class="btn btn-sm btn-light" type="button" id="treesDropdown" data-bs-toggle="dropdown" aria-expanded="false">
+                        <button class="btn btn-sm btn-light" type="button" id="treesDropdown" data-bs-toggle="dropdown"
+                            aria-expanded="false">
                             <i class="bi bi-three-dots-vertical"></i>
                         </button>
                         <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="treesDropdown">
                             <li><a class="dropdown-item" href="#"><i class="bi bi-download me-2"></i>ดาวน์โหลด</a></li>
                             <li><a class="dropdown-item" href="#"><i class="bi bi-fullscreen me-2"></i>ขยายกราฟ</a></li>
-                            <li><hr class="dropdown-divider"></li>
-                            <li><a class="dropdown-item" href="#"><i class="bi bi-info-circle me-2"></i>ข้อมูลเพิ่มเติม</a></li>
+                            <li>
+                                <hr class="dropdown-divider">
+                            </li>
+                            <li><a class="dropdown-item" href="#"><i
+                                        class="bi bi-info-circle me-2"></i>ข้อมูลเพิ่มเติม</a></li>
                         </ul>
                     </div>
                 </div>
@@ -265,7 +247,6 @@ $dataSumSoldJson    = json_encode($dataSumSold);
         </div>
     </div>
 
-    <!-- ข้อมูลสรุปต้นไม้ทั้งหมด -->
     <div class="row">
         <div class="col-12">
             <div class="card border-0 shadow-sm">
@@ -312,22 +293,18 @@ $dataSumSoldJson    = json_encode($dataSumSold);
     </div>
 </div>
 
-<!-- โหลด Chart.js ผ่าน CDN -->
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script>
-    // ข้อมูลจาก PHP
     const labels = <?= $labelsJson ?>;
-    const dataIncome     = <?= $dataIncomeJson ?>;
-    const dataExpense    = <?= $dataExpenseJson ?>;
+    const dataIncome = <?= $dataIncomeJson ?>;
+    const dataExpense = <?= $dataExpenseJson ?>;
     const dataCountAdded = <?= $dataCountAddedJson ?>;
-    const dataSumDied    = <?= $dataSumDiedJson ?>;
-    const dataSumSold    = <?= $dataSumSoldJson ?>;
+    const dataSumDied = <?= $dataSumDiedJson ?>;
+    const dataSumSold = <?= $dataSumSoldJson ?>;
 
-    // กำหนดสีให้สอดคล้องกับ theme
     Chart.defaults.font.family = "'Sarabun', sans-serif";
     Chart.defaults.color = '#6c757d';
-    
-    // กราฟรายรับ vs รายจ่าย
+
     const ctxIE = document.getElementById('incomeExpenseChart').getContext('2d');
     new Chart(ctxIE, {
         type: 'line',
@@ -368,7 +345,7 @@ $dataSumSoldJson    = json_encode($dataSumSold);
                     mode: 'index',
                     intersect: false,
                     callbacks: {
-                        label: function(context) {
+                        label: function (context) {
                             let label = context.dataset.label || '';
                             if (label) {
                                 label += ': ';
@@ -382,7 +359,7 @@ $dataSumSoldJson    = json_encode($dataSumSold);
                 }
             },
             scales: {
-                x: { 
+                x: {
                     grid: {
                         display: false
                     }
@@ -391,7 +368,7 @@ $dataSumSoldJson    = json_encode($dataSumSold);
                     display: true,
                     beginAtZero: true,
                     ticks: {
-                        callback: function(value) {
+                        callback: function (value) {
                             return value.toLocaleString('th-TH') + ' ฿';
                         }
                     }
@@ -400,7 +377,6 @@ $dataSumSoldJson    = json_encode($dataSumSold);
         }
     });
 
-    // กราฟสถิติ ต้นไม้เพิ่ม/ตาย/ขาย
     const ctxTrees = document.getElementById('treesStatChart').getContext('2d');
     new Chart(ctxTrees, {
         type: 'bar',
@@ -444,7 +420,7 @@ $dataSumSoldJson    = json_encode($dataSumSold);
                 }
             },
             scales: {
-                x: { 
+                x: {
                     stacked: true,
                     grid: {
                         display: false
@@ -458,9 +434,7 @@ $dataSumSoldJson    = json_encode($dataSumSold);
         }
     });
 
-    // ตัวอย่างการดึงข้อมูลสรุป (ในสถานการณ์จริงคุณต้องดึงข้อมูลเหล่านี้จากเซิร์ฟเวอร์)
-    document.addEventListener('DOMContentLoaded', function() {
-        // สมมติข้อมูล - ในกรณีจริงต้องใช้ AJAX เพื่อดึงข้อมูล
+    document.addEventListener('DOMContentLoaded', function () {
         document.getElementById('totalTrees').textContent = '423';
         document.getElementById('availableTrees').textContent = '369';
         document.getElementById('totalSpecies').textContent = '42';

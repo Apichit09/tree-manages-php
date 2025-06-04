@@ -1,15 +1,10 @@
 <?php
-// generate_invoice.php
-
-// ป้องกันการแสดง errors และ warnings ที่อาจทำให้ headers ถูกส่งก่อน
 error_reporting(0);
-// เริ่ม output buffering เพื่อควบคุมการส่ง output ไปยังเบราว์เซอร์
 if (ob_get_length()) {
     ob_clean();
 }
 ob_start();
 
-// 1) โหลด Dompdf (กรณีติดตั้งด้วย Composer)
 require_once __DIR__ . '/vendor/autoload.php';
 use Dompdf\Dompdf;
 use Dompdf\Options;
@@ -23,13 +18,11 @@ if (!isLoggedIn()) {
     exit;
 }
 
-// 2) รับพารามิเตอร์ order_code จาก URL (แทนการใช้ id)
 $order_code = $_GET['code'] ?? '';
 if (empty($order_code)) {
     redirect('orders.php');
 }
 
-// 3) ดึงข้อมูลออเดอร์ตาม order_code
 $stmtOrder = $pdo->prepare("
     SELECT 
         o.id,
@@ -55,7 +48,6 @@ if (!$order) {
     redirect('orders.php');
 }
 
-// 4) ดึงรายการ order_items โดยใช้ order_id ที่ได้มา
 $orderId = $order['id'];
 $stmtItems = $pdo->prepare("
     SELECT *
@@ -66,32 +58,37 @@ $stmtItems = $pdo->prepare("
 $stmtItems->execute(['order_id' => $orderId]);
 $orderItems = $stmtItems->fetchAll(PDO::FETCH_ASSOC);
 
-// 5) คำนวณยอดรวมต้นไม้ (subtotal)
 $subtotal = array_sum(array_column($orderItems, 'total_price'));
 
-// 6) เตรียมวันที่ปัจจุบัน
 $currentDate = date('d/m/Y');
 $thaiMonths = [
-    1 => 'มกราคม', 2 => 'กุมภาพันธ์', 3 => 'มีนาคม', 4 => 'เมษายน', 5 => 'พฤษภาคม', 6 => 'มิถุนายน',
-    7 => 'กรกฎาคม', 8 => 'สิงหาคม', 9 => 'กันยายน', 10 => 'ตุลาคม', 11 => 'พฤศจิกายน', 12 => 'ธันวาคม'
+    1 => 'มกราคม',
+    2 => 'กุมภาพันธ์',
+    3 => 'มีนาคม',
+    4 => 'เมษายน',
+    5 => 'พฤษภาคม',
+    6 => 'มิถุนายน',
+    7 => 'กรกฎาคม',
+    8 => 'สิงหาคม',
+    9 => 'กันยายน',
+    10 => 'ตุลาคม',
+    11 => 'พฤศจิกายน',
+    12 => 'ธันวาคม'
 ];
 $day = date('j');
-$month = $thaiMonths[(int)date('n')];
+$month = $thaiMonths[(int) date('n')];
 $year = date('Y') + 543;
 $thaiDate = "$day $month $year";
 
-// 7) หา path เต็มของโฟลเดอร์ฟอนต์ Chakra_Petch
-$fontDir     = realpath(__DIR__ . '/public/fonts/Chakra_Petch');
+$fontDir = realpath(__DIR__ . '/public/fonts/Chakra_Petch');
 $regularFont = $fontDir . '/ChakraPetch-Regular.ttf';
-$boldFont    = $fontDir . '/ChakraPetch-Bold.ttf';
+$boldFont = $fontDir . '/ChakraPetch-Bold.ttf';
 
-// ตรวจว่าฟอนต์มีอยู่จริง
 if (!file_exists($regularFont) || !file_exists($boldFont)) {
     echo "ไม่พบไฟล์ฟอนต์ ChakraPetch! กรุณาตรวจสอบใน public/fonts/Chakra_Petch/";
     exit;
 }
 
-// 8) สร้าง HTML template สำหรับ PDF
 $html = '
 <!DOCTYPE html>
 <html lang="th">
@@ -675,7 +672,7 @@ foreach ($orderItems as $idx => $it) {
                         <td class="text-left">' . e($it['tree_name']) . '</td>
                         <td class="text-center">' . e($it['size']) . '</td>
                         <td class="text-right">' . number_format($it['unit_price'], 2) . '</td>
-                        <td class="text-center">' . (int)$it['quantity'] . '</td>
+                        <td class="text-center">' . (int) $it['quantity'] . '</td>
                         <td class="text-right">' . number_format($it['total_price'], 2) . '</td>
                     </tr>';
 }
@@ -737,31 +734,25 @@ $html .= '
 </html>
 ';
 
-// 9) ตั้งค่า Options ให้ Dompdf รองรับฟอนต์ Chakra Petch
 $options = new Options();
 $options->set('defaultFont', 'ChakraPetch');
-// อนุญาตให้ Dompdf อ่านไฟล์จากระบบ local (chroot)
-$options->setChroot([ __DIR__, __DIR__ . '/public/fonts/Chakra_Petch' ]);  
+$options->setChroot([__DIR__, __DIR__ . '/public/fonts/Chakra_Petch']);
 $options->set('isHtml5ParserEnabled', true);
-$options->set('isRemoteEnabled', true);  // เปลี่ยนเป็น true เพื่อรองรับการโหลดทรัพยากรจากภายนอก
-
+$options->set('isRemoteEnabled', true);
 $dompdf = new Dompdf($options);
 $dompdf->loadHtml($html, 'UTF-8');
 
-// สำคัญ: กำหนดขนาดกระดาษ A4 และระยะห่างขอบเพื่อให้อยู่ตรงกลางพอดี
 $dompdf->setPaper('A4', 'portrait');
 $dompdf->render();
 
-// 10) ส่งออก PDF ให้เบราว์เซอร์แสดงผล (inline)
 $pdfOutput = $dompdf->output();
-$pdfDir    = __DIR__ . '/pdf';
+$pdfDir = __DIR__ . '/pdf';
 if (!is_dir($pdfDir)) {
     mkdir($pdfDir, 0755, true);
 }
-$pdfFile   = $pdfDir . '/bill_' . $order['order_code'] . '.pdf';
+$pdfFile = $pdfDir . '/bill_' . $order['order_code'] . '.pdf';
 file_put_contents($pdfFile, $pdfOutput);
 
-// ล้าง output buffer ก่อนส่ง headers
 if (ob_get_length()) {
     ob_end_clean();
 }

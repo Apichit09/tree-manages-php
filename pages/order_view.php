@@ -1,21 +1,17 @@
 <?php
-// pages/order_view.php
 session_start();
 require_once __DIR__ . '/../config/db.php';
 require_once __DIR__ . '/../includes/functions.php';
 
-// 1) ตรวจล็อกอิน
 if (!isLoggedIn()) {
     redirect('login.php');
 }
 
-// 2) รับพารามิเตอร์ order_code (code) จาก GET
 if (!isset($_GET['code'])) {
     redirect('orders.php');
 }
 $order_code = $_GET['code'];
 
-// ดึงข้อมูลออเดอร์โดยใช้ order_code
 $stmtOrder = $pdo->prepare("
     SELECT o.*, g.name AS garden_name, g.phone AS garden_phone, g.address AS garden_address
     FROM orders o
@@ -30,7 +26,6 @@ if (!$order) {
     redirect('orders.php');
 }
 
-// ดึงรายการ order_items
 $stmtItems = $pdo->prepare("
     SELECT * 
     FROM order_items 
@@ -42,14 +37,13 @@ $orderItems = $stmtItems->fetchAll(PDO::FETCH_ASSOC);
 <?php include __DIR__ . '/../includes/header.php'; ?>
 
 <div class="container">
-    <!-- Breadcrumb navigation -->
     <nav aria-label="breadcrumb" class="mb-4">
         <ol class="breadcrumb">
             <li class="breadcrumb-item"><a href="orders.php" class="text-decoration-none">ออเดอร์/บิล</a></li>
             <li class="breadcrumb-item active" aria-current="page">รายละเอียดบิล</li>
         </ol>
     </nav>
-    
+
     <div class="row mb-4">
         <div class="col-12">
             <div class="d-flex align-items-center justify-content-between flex-wrap">
@@ -65,8 +59,8 @@ $orderItems = $stmtItems->fetchAll(PDO::FETCH_ASSOC);
                     <a href="orders.php" class="btn btn-outline-secondary me-2">
                         <i class="bi bi-arrow-left me-1"></i> กลับไปรายการบิล
                     </a>
-                    <a href="../generate_invoice.php?code=<?= e($order['order_code']); ?>" target="_blank" 
-                       class="btn btn-success">
+                    <a href="../generate_invoice.php?code=<?= e($order['order_code']); ?>" target="_blank"
+                        class="btn btn-success">
                         <i class="bi bi-file-pdf me-1"></i> ดาวน์โหลด PDF
                     </a>
                 </div>
@@ -76,7 +70,6 @@ $orderItems = $stmtItems->fetchAll(PDO::FETCH_ASSOC);
 
     <div class="row">
         <div class="col-lg-8">
-            <!-- ตารางรายการต้นไม้ -->
             <div class="card border-0 shadow-sm mb-4">
                 <div class="card-header bg-white py-3">
                     <div class="d-flex justify-content-between align-items-center">
@@ -114,16 +107,16 @@ $orderItems = $stmtItems->fetchAll(PDO::FETCH_ASSOC);
                                             <td>
                                                 <div class="d-flex align-items-center">
                                                     <?php if (!empty($it['image_link'])): ?>
-                                                    <div class="me-2">
-                                                        <img src="<?= e($it['image_link']) ?>" 
-                                                            class="rounded" alt="<?= e($it['tree_name']) ?>" 
-                                                            style="width:40px; height:40px; object-fit:cover;">
-                                                    </div>
+                                                        <div class="me-2">
+                                                            <img src="<?= e($it['image_link']) ?>" class="rounded"
+                                                                alt="<?= e($it['tree_name']) ?>"
+                                                                style="width:40px; height:40px; object-fit:cover;">
+                                                        </div>
                                                     <?php else: ?>
-                                                    <div class="me-2 bg-light rounded d-flex align-items-center justify-content-center"
-                                                        style="width:40px; height:40px;">
-                                                        <i class="bi bi-tree text-muted"></i>
-                                                    </div>
+                                                        <div class="me-2 bg-light rounded d-flex align-items-center justify-content-center"
+                                                            style="width:40px; height:40px;">
+                                                            <i class="bi bi-tree text-muted"></i>
+                                                        </div>
                                                     <?php endif; ?>
                                                     <span><?= e($it['tree_name']) ?></span>
                                                 </div>
@@ -132,7 +125,7 @@ $orderItems = $stmtItems->fetchAll(PDO::FETCH_ASSOC);
                                             <td class="text-end"><?= number_format($it['unit_price'], 2) ?></td>
                                             <td class="text-center">
                                                 <span class="badge bg-light text-dark border">
-                                                    <?= (int)$it['quantity'] ?>
+                                                    <?= (int) $it['quantity'] ?>
                                                 </span>
                                             </td>
                                             <td class="text-end fw-bold"><?= number_format($it['total_price'], 2) ?></td>
@@ -145,9 +138,8 @@ $orderItems = $stmtItems->fetchAll(PDO::FETCH_ASSOC);
                 </div>
             </div>
         </div>
-        
+
         <div class="col-lg-4">
-            <!-- ข้อมูลบิล -->
             <div class="card border-0 shadow-sm mb-4">
                 <div class="card-header bg-white py-3">
                     <h5 class="card-title mb-0">
@@ -165,12 +157,12 @@ $orderItems = $stmtItems->fetchAll(PDO::FETCH_ASSOC);
                             <div class="col-7">
                                 <i class="bi bi-calendar2 me-1 text-muted"></i>
                                 <?= date('d/m/Y', strtotime($order['created_at'])); ?>
-                                <small class="text-muted"><?= date('H:i', strtotime($order['created_at'])); ?> น.</small>
+                                <small class="text-muted"><?= date('H:i', strtotime($order['created_at'])); ?>
+                                    น.</small>
                             </div>
                         </div>
                     </div>
-                    
-                    <!-- ข้อมูลสวน -->
+
                     <div class="mb-3 pb-3 border-bottom">
                         <h6 class="card-subtitle text-muted mb-3">
                             <i class="bi bi-flower1 me-1"></i>ข้อมูลสวน
@@ -193,8 +185,7 @@ $orderItems = $stmtItems->fetchAll(PDO::FETCH_ASSOC);
                             </div>
                         <?php endif; ?>
                     </div>
-                    
-                    <!-- ข้อมูลลูกค้า -->
+
                     <div class="mb-3 pb-3 border-bottom">
                         <h6 class="card-subtitle text-muted mb-3">
                             <i class="bi bi-person me-1"></i>ข้อมูลลูกค้า
@@ -210,8 +201,7 @@ $orderItems = $stmtItems->fetchAll(PDO::FETCH_ASSOC);
                             </div>
                         <?php endif; ?>
                     </div>
-                    
-                    <!-- สรุปราคา -->
+
                     <h6 class="card-subtitle text-muted mb-3">
                         <i class="bi bi-cash-coin me-1"></i>สรุปราคา
                     </h6>
@@ -231,22 +221,21 @@ $orderItems = $stmtItems->fetchAll(PDO::FETCH_ASSOC);
                     <div class="border-top pt-3">
                         <div class="d-flex justify-content-between align-items-center">
                             <span class="fw-bold">ยอดทั้งหมด</span>
-                            <span class="fs-4 fw-bold text-success"><?= number_format($order['total_price'], 2) ?> ฿</span>
+                            <span class="fs-4 fw-bold text-success"><?= number_format($order['total_price'], 2) ?>
+                                ฿</span>
                         </div>
                     </div>
                 </div>
             </div>
-            
-            <!-- ปุ่มดำเนินการ -->
+
             <div class="card border-0 shadow-sm">
                 <div class="card-body">
-                    <a href="../generate_invoice.php?code=<?= e($order['order_code']); ?>" 
-                       class="btn btn-success w-100 mb-2" target="_blank">
+                    <a href="../generate_invoice.php?code=<?= e($order['order_code']); ?>"
+                        class="btn btn-success w-100 mb-2" target="_blank">
                         <i class="bi bi-file-pdf me-1"></i> พิมพ์ใบเสร็จ
                     </a>
-                    <a href="orders.php?cancel_id=<?= $order['id'] ?>"
-                       class="btn btn-outline-warning w-100 mb-2"
-                       onclick="return confirm('ยืนยันยกเลิกออเดอร์ ID <?= $order['id'] ?> หรือไม่? จะคืนสต็อกต้นไม้ด้วย');">
+                    <a href="orders.php?cancel_id=<?= $order['id'] ?>" class="btn btn-outline-warning w-100 mb-2"
+                        onclick="return confirm('ยืนยันยกเลิกออเดอร์ ID <?= $order['id'] ?> หรือไม่? จะคืนสต็อกต้นไม้ด้วย');">
                         <i class="bi bi-x-circle me-1"></i> ยกเลิกออเดอร์ (คืนสต็อก)
                     </a>
                     <a href="orders.php" class="btn btn-outline-secondary w-100">
@@ -259,19 +248,23 @@ $orderItems = $stmtItems->fetchAll(PDO::FETCH_ASSOC);
 </div>
 
 <style>
-.badge {
-    font-weight: 500;
-}
-.table td, .table th {
-    padding: 0.75rem;
-}
-.card {
-    border-radius: 8px;
-    overflow: hidden;
-}
-.card-header {
-    border-bottom: 1px solid rgba(0,0,0,0.05);
-}
+    .badge {
+        font-weight: 500;
+    }
+
+    .table td,
+    .table th {
+        padding: 0.75rem;
+    }
+
+    .card {
+        border-radius: 8px;
+        overflow: hidden;
+    }
+
+    .card-header {
+        border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+    }
 </style>
 
 <?php include __DIR__ . '/../includes/footer.php'; ?>
