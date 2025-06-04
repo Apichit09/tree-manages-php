@@ -1,0 +1,19 @@
+# เปิดใช้งาน Rewrite Engine
+RewriteEngine On
+
+# 1) ตั้งให้หน้าแรกเป็น index.php โดยอัตโนมัติ
+DirectoryIndex index.php
+
+# 2) หากไฟล์หรือโฟลเดอร์ที่ขอมีอยู่จริง ให้วนลูปไปใช้ไฟล์นั้นโดยตรง
+RewriteCond %{REQUEST_FILENAME} -f [OR]
+RewriteCond %{REQUEST_FILENAME} -d
+RewriteRule ^ - [L]
+
+# 3) ถ้ามีการเรียก URL ที่ไม่มีนามสกุล ให้ต่อท้าย .php และส่งไปยังไฟล์จริง
+#    เช่น /contact → /contact.php
+RewriteRule ^([^/]+)/?$ $1.php [L,QSA]
+
+# 4) (เพิ่มเติม) เพื่อป้องกันไม่ให้เรียกไฟล์ .php ตรงๆ ให้ redirect มาเป็น URL ที่ไม่มี .php
+#    เช่น หากใครเข้า /about.php → redirect (301) ไป /about
+RewriteCond %{THE_REQUEST} \s/+(.*)\.php[?\s] [NC]
+RewriteRule ^ /%1 [R=301,L]
